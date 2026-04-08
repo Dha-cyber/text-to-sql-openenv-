@@ -1,12 +1,3 @@
----
-title: Text to SQL OpenEnv
-emoji: 🗄️
-colorFrom: blue
-colorTo: purple
-sdk: docker
-pinned: false
-license: mit
----
 
 # Text-to-SQL OpenEnv
 
