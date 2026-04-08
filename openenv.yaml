@@ -1,0 +1,185 @@
+name: text-to-sql-env
+version: "1.0"
+description: >
+  A reinforcement-learning environment where an agent must write SQLite queries
+  to answer business questions given a database schema and sample data.
+  Three tasks of increasing difficulty: easy, medium, and hard.
+
+server:
+  base_url: http://localhost:7860
+  health_endpoint: /health
+
+endpoints:
+  reset:
+    method: POST
+    path: /reset
+    request:
+      type: object
+      properties:
+        task_id:
+          type: string
+          description: Which task to load. Defaults to "employee-filter".
+    response:
+      type: object
+      properties:
+        observation:
+          $ref: "#/schemas/SQLObservation"
+        done:
+          type: boolean
+
+  step:
+    method: POST
+    path: /step
+    request:
+      type: object
+      required: [action]
+      properties:
+        action:
+          $ref: "#/schemas/SQLAction"
+    response:
+      type: object
+      properties:
+        observation:
+          $ref: "#/schemas/SQLObservation"
+        reward:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+        done:
+          type: boolean
+        info:
+          type: object
+
+  state:
+    method: GET
+    path: /state
+    response:
+      type: object
+      properties:
+        session_id:
+          type: string
+        task_id:
+          type: string
+        step:
+          type: integer
+        total_reward:
+          type: number
+        done:
+          type: boolean
+        observation:
+          $ref: "#/schemas/SQLObservation"
+
+schemas:
+  SQLAction:
+    type: object
+    required: [sql_query]
+    properties:
+      sql_query:
+        type: string
+        description: A SQLite SELECT query answering the given business question.
+      reasoning:
+        type: string
+        description: Optional chain-of-thought explanation before writing the query.
+
+  SQLObservation:
+    type: object
+    properties:
+      task_id:
+        type: string
+      task_name:
+        type: string
+      description:
+        type: string
+      schema_ddl:
+        type: string
+        description: CREATE TABLE statements for the in-memory SQLite database.
+      question:
+        type: string
+        description: Natural language business question the agent must answer.
+      sample_rows:
+        type: string
+        description: Human-readable sample data for context.
+      expected_columns:
+        type: array
+        items:
+          type: string
+        description: Column names the result must include.
+      step:
+        type: integer
+        description: Current step number within the episode.
+      max_steps:
+        type: integer
+        description: Maximum steps allowed before episode ends.
+      previous_attempts:
+        type: array
+        items:
+          type: object
+          properties:
+            step:
+              type: integer
+            query:
+              type: string
+            score:
+              type: number
+            reward:
+              type: number
+            feedback:
+              type: string
+        description: Last 3 query attempts with feedback for in-context learning.
+      last_error:
+        type: string
+        nullable: true
+        description: Error message from the last attempt, if score was low.
+      hints:
+        type: array
+        items:
+          type: string
+        description: Progressive hints for the task.
+
+tasks:
+  - id: employee-filter
+    name: Employee Department Filter
+    difficulty: easy
+    max_steps: 5
+    description: >
+      Filter employees by department and salary. Return name, salary, and city
+      for Engineering staff earning above $80,000, sorted by salary descending.
+
+  - id: sales-by-region
+    name: Sales Summary by Region
+    difficulty: medium
+    max_steps: 5
+    description: >
+      Join salespeople and deals tables. Aggregate deal amounts per region
+      for the year 2024. Return the top 3 regions by total, rounded to 2 dp.
+
+  - id: churn-analysis
+    name: Customer Churn Analysis
+    difficulty: hard
+    max_steps: 5
+    description: >
+      Multi-table analysis: find churned customers, compute months subscribed,
+      total paid, and support ticket count. Order by total paid descending.
+
+reward:
+  range: [0.0, 1.0]
+  terminal_condition: correct_data == 1.0 or step >= max_steps
+  components:
+    non_empty:
+      weight: 0.10
+      description: Query is non-empty.
+    syntax_valid:
+      weight: 0.20
+      description: Query parses without sqlite3 error.
+    executes:
+      weight: 0.25
+      description: Query executes against the live DB without runtime error.
+    correct_columns:
+      weight: 0.20
+      description: All expected column names are present in the result.
+    correct_data:
+      weight: 0.25
+      description: Result set matches expected rows (order-insensitive, values normalised).
+    efficiency_penalty:
+      weight: -0.02
+      description: Penalty per step beyond the first, to reward fewer attempts.
